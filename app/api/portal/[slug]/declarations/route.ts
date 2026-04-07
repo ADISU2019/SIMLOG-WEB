@@ -1,27 +1,36 @@
-import { NextResponse } from "next/server";
+// app/api/portal/[slug]/declarations/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 
 export const runtime = "nodejs";
 
+type RouteParams = Promise<{
+  slug: string;
+}>;
+
 export async function POST(
-  req: Request,
-  { params }: { params: { slug: string } }
+  req: NextRequest,
+  { params }: { params: RouteParams }
 ) {
   try {
-    const slug = params.slug;
+    const { slug } = await params;
     const body = await req.json().catch(() => ({}));
 
-    const id: string | undefined = body?.id; // optional: force doc id = url id
-    const createdBy: string | undefined = body?.createdBy;
+    const createdBy =
+      typeof body?.createdBy === "string" ? body.createdBy.trim() : undefined;
 
     if (!slug) {
       return NextResponse.json({ error: "Missing slug" }, { status: 400 });
     }
 
     const db = getAdminDb();
-    const col = db.collection("transiters").doc(slug).collection("declarations");
-    const ref = id ? col.doc(id) : col.doc();
 
+    const col = db
+      .collection("transiters")
+      .doc(slug)
+      .collection("declarations");
+
+    const ref = col.doc();
     const now = new Date();
 
     await ref.set(
@@ -35,7 +44,7 @@ export async function POST(
       { merge: true }
     );
 
-    return NextResponse.json({ id: ref.id }, { status: 200 });
+    return NextResponse.json({ ok: true, id: ref.id }, { status: 200 });
   } catch (e: any) {
     console.error(e);
     return NextResponse.json(

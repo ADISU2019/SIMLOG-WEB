@@ -52,8 +52,11 @@ import ContainersTab from "./ContainersTab";
 import DocumentsTab from "./DocumentsTab";
 import AssessmentNotice from "./AssessmentNotice";
 
-import { DeclarationStatus } from "@/types/declarationStatus";
 import {
+  DECLARATION_STATUS,
+  type DeclarationStatus,
+} from "@/types/declarationStatus";
+import type {
   Declaration,
   DeclarationItem,
   DeclarationHeader,
@@ -79,22 +82,13 @@ const tabs = [
 ] as const;
 
 const allowedTransitions: Record<DeclarationStatus, DeclarationStatus[]> = {
-  [DeclarationStatus.DRAFT]: [
-    DeclarationStatus.VERIFIED,
-    DeclarationStatus.CANCELLED,
-  ],
-  [DeclarationStatus.VERIFIED]: [
-    DeclarationStatus.ASSESSED,
-    DeclarationStatus.CANCELLED,
-  ],
-  [DeclarationStatus.ASSESSED]: [DeclarationStatus.SUBMITTED],
-  [DeclarationStatus.SUBMITTED]: [
-    DeclarationStatus.PAID,
-    DeclarationStatus.CANCELLED,
-  ],
-  [DeclarationStatus.PAID]: [DeclarationStatus.RELEASED],
-  [DeclarationStatus.RELEASED]: [],
-  [DeclarationStatus.CANCELLED]: [],
+  DRAFT: [DECLARATION_STATUS.VERIFIED, DECLARATION_STATUS.CANCELLED],
+  VERIFIED: [DECLARATION_STATUS.ASSESSED, DECLARATION_STATUS.CANCELLED],
+  ASSESSED: [DECLARATION_STATUS.SUBMITTED],
+  SUBMITTED: [DECLARATION_STATUS.PAID, DECLARATION_STATUS.CANCELLED],
+  PAID: [DECLARATION_STATUS.RELEASED],
+  RELEASED: [],
+  CANCELLED: [],
 };
 
 type Props = {
@@ -110,10 +104,9 @@ export default function DeclarationWizard({
 }: Props) {
   const [activeTab, setActiveTab] = useState<string>("Header");
   const [status, setStatus] = useState<DeclarationStatus>(
-    DeclarationStatus.DRAFT
+    DECLARATION_STATUS.DRAFT
   );
 
-  // Role-based visibility (placeholder for now)
   const [role, setRole] = useState<"declarant" | "finance" | "officer">(
     "declarant"
   );
@@ -139,7 +132,6 @@ export default function DeclarationWizard({
   const [docExists, setDocExists] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Prevent autosave triggered by snapshot hydration
   const isHydratingRef = useRef(true);
 
   const hasValidIdentity = Boolean(slug && declarationId);
@@ -149,9 +141,6 @@ export default function DeclarationWizard({
     return doc(db, "transiters", slug, "declarations", declarationId);
   }, [slug, declarationId, hasValidIdentity]);
 
-  // ========================
-  // LOAD EXISTING DECLARATION
-  // ========================
   useEffect(() => {
     if (!hasValidIdentity || !declRef) {
       setLoading(false);
@@ -171,8 +160,6 @@ export default function DeclarationWizard({
         }
 
         setDocExists(true);
-
-        // Hydration guard: don’t autosave while applying snapshot data
         isHydratingRef.current = true;
 
         const data = snap.data() as any;
@@ -192,7 +179,7 @@ export default function DeclarationWizard({
           }
         );
         setStatus(
-          (data.status as DeclarationStatus) || DeclarationStatus.DRAFT
+          (data.status as DeclarationStatus) || DECLARATION_STATUS.DRAFT
         );
 
         queueMicrotask(() => {
@@ -208,20 +195,14 @@ export default function DeclarationWizard({
     return () => unsub();
   }, [hasValidIdentity, declRef]);
 
-  // ========================
-  // ROLE/STATUS BASED FORM LOCKING
-  // ========================
   const canEditForm =
     !readOnly &&
     role === "declarant" &&
-    (status === DeclarationStatus.DRAFT ||
-      status === DeclarationStatus.VERIFIED);
+    (status === DECLARATION_STATUS.DRAFT ||
+      status === DECLARATION_STATUS.VERIFIED);
 
   const formReadOnly = !canEditForm;
 
-  // ========================
-  // API HELPERS
-  // ========================
   const saveBase = async (next: Partial<Declaration>) => {
     if (readOnly) return;
     if (!hasValidIdentity) {
@@ -239,14 +220,11 @@ export default function DeclarationWizard({
       ...next,
     };
 
-    const res = await fetch(
-      `/api/portal/${slug}/declarations/${declarationId}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
+    const res = await fetch(`/api/portal/${slug}/declarations/${declarationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -282,9 +260,6 @@ export default function DeclarationWizard({
     }
   };
 
-  // ========================
-  // AUTO-SAVE (DEBOUNCED)
-  // ========================
   useDebouncedEffect(
     async () => {
       if (readOnly) return;
@@ -316,9 +291,6 @@ export default function DeclarationWizard({
     800
   );
 
-  // ========================
-  // WORKFLOW HELPERS
-  // ========================
   const updateStatusLocal = (nextStatus: DeclarationStatus) => {
     if (!allowedTransitions[status].includes(nextStatus)) {
       alert(`Invalid workflow transition: ${status} → ${nextStatus}`);
@@ -327,13 +299,10 @@ export default function DeclarationWizard({
     setStatus(nextStatus);
   };
 
-  // ========================
-  // WORKFLOW HANDLERS (SERVER-SIDE)
-  // ========================
   const handleSaveDraft = async () => {
     try {
-      await saveBase({ status: DeclarationStatus.DRAFT });
-      setStatus(DeclarationStatus.DRAFT);
+      await saveBase({ status: DECLARATION_STATUS.DRAFT });
+      setStatus(DECLARATION_STATUS.DRAFT);
       alert("Draft saved ✅");
     } catch (error) {
       console.error(error);
@@ -344,8 +313,8 @@ export default function DeclarationWizard({
   const handleVerify = async () => {
     try {
       if (readOnly) return;
-      await callStatus(DeclarationStatus.VERIFIED);
-      updateStatusLocal(DeclarationStatus.VERIFIED);
+      await callStatus(DECLARATION_STATUS.VERIFIED);
+      updateStatusLocal(DECLARATION_STATUS.VERIFIED);
       alert("Verified ✅");
     } catch (error) {
       console.error(error);
@@ -362,15 +331,14 @@ export default function DeclarationWizard({
     try {
       if (readOnly) return;
 
-      // Persist totals first so server has the latest values
       await saveBase({ totals: calculatedTotals });
 
-      await callStatus(DeclarationStatus.ASSESSED, {
+      await callStatus(DECLARATION_STATUS.ASSESSED, {
         itemsCount: items.length,
         totals: calculatedTotals,
       });
 
-      updateStatusLocal(DeclarationStatus.ASSESSED);
+      updateStatusLocal(DECLARATION_STATUS.ASSESSED);
       alert("Assessment complete ✅");
     } catch (error) {
       console.error(error);
@@ -379,14 +347,14 @@ export default function DeclarationWizard({
   };
 
   const handleSubmit = async () => {
-    if (status !== DeclarationStatus.ASSESSED) {
+    if (status !== DECLARATION_STATUS.ASSESSED) {
       return alert("Declaration must be ASSESSED before submission");
     }
 
     try {
       if (readOnly) return;
-      await callStatus(DeclarationStatus.SUBMITTED);
-      updateStatusLocal(DeclarationStatus.SUBMITTED);
+      await callStatus(DECLARATION_STATUS.SUBMITTED);
+      updateStatusLocal(DECLARATION_STATUS.SUBMITTED);
       alert("Submitted ✅");
     } catch (error) {
       console.error(error);
@@ -395,7 +363,7 @@ export default function DeclarationWizard({
   };
 
   const handlePayment = async () => {
-    if (status !== DeclarationStatus.SUBMITTED) {
+    if (status !== DECLARATION_STATUS.SUBMITTED) {
       return alert("Declaration must be SUBMITTED before payment");
     }
 
@@ -404,12 +372,11 @@ export default function DeclarationWizard({
 
       const paymentReference = `PAY-${Date.now()}`;
 
-      // Save payment reference so it exists on the declaration doc
       await saveBase({ paymentReference } as any);
 
-      await callStatus(DeclarationStatus.PAID, { paymentReference });
+      await callStatus(DECLARATION_STATUS.PAID, { paymentReference });
 
-      updateStatusLocal(DeclarationStatus.PAID);
+      updateStatusLocal(DECLARATION_STATUS.PAID);
       alert("Payment successful 💳");
     } catch (error) {
       console.error(error);
@@ -418,14 +385,14 @@ export default function DeclarationWizard({
   };
 
   const handleRelease = async () => {
-    if (status !== DeclarationStatus.PAID) {
+    if (status !== DECLARATION_STATUS.PAID) {
       return alert("Declaration must be PAID before release");
     }
 
     try {
       if (readOnly) return;
-      await callStatus(DeclarationStatus.RELEASED);
-      updateStatusLocal(DeclarationStatus.RELEASED);
+      await callStatus(DECLARATION_STATUS.RELEASED);
+      updateStatusLocal(DECLARATION_STATUS.RELEASED);
       alert("Released 🟢");
     } catch (error) {
       console.error(error);
@@ -434,13 +401,13 @@ export default function DeclarationWizard({
   };
 
   const handleCancel = async () => {
-    const cancellable = [
-      DeclarationStatus.DRAFT,
-      DeclarationStatus.VERIFIED,
-      DeclarationStatus.SUBMITTED,
-    ] as const;
-
-    if (!cancellable.includes(status as any)) {
+    if (
+      !(
+        status === DECLARATION_STATUS.DRAFT ||
+        status === DECLARATION_STATUS.VERIFIED ||
+        status === DECLARATION_STATUS.SUBMITTED
+      )
+    ) {
       return alert(
         "Only DRAFT, VERIFIED, or SUBMITTED declarations can be cancelled."
       );
@@ -451,8 +418,8 @@ export default function DeclarationWizard({
 
     try {
       if (readOnly) return;
-      await callStatus(DeclarationStatus.CANCELLED);
-      updateStatusLocal(DeclarationStatus.CANCELLED);
+      await callStatus(DECLARATION_STATUS.CANCELLED);
+      updateStatusLocal(DECLARATION_STATUS.CANCELLED);
       alert("Cancelled ✅");
     } catch (error) {
       console.error(error);
@@ -460,9 +427,6 @@ export default function DeclarationWizard({
     }
   };
 
-  // ========================
-  // RENDER TAB (pass readOnly)
-  // ========================
   const renderTab = () => {
     switch (activeTab) {
       case "Header":
@@ -524,9 +488,6 @@ export default function DeclarationWizard({
     }
   };
 
-  // ========================
-  // RENDER WORKFLOW BUTTONS WITH ROLE CHECK
-  // ========================
   const renderWorkflowButtons = () => (
     <div className="flex flex-wrap gap-2">
       {role === "declarant" && (
@@ -537,7 +498,7 @@ export default function DeclarationWizard({
               readOnly ||
               loading ||
               !hasValidIdentity ||
-              status !== DeclarationStatus.DRAFT
+              status !== DECLARATION_STATUS.DRAFT
             }
             onClick={handleSaveDraft}
           >
@@ -550,7 +511,7 @@ export default function DeclarationWizard({
               readOnly ||
               loading ||
               !hasValidIdentity ||
-              status !== DeclarationStatus.DRAFT
+              status !== DECLARATION_STATUS.DRAFT
             }
             onClick={handleVerify}
           >
@@ -563,7 +524,7 @@ export default function DeclarationWizard({
               readOnly ||
               loading ||
               !hasValidIdentity ||
-              status !== DeclarationStatus.VERIFIED
+              status !== DECLARATION_STATUS.VERIFIED
             }
             onClick={handleAssess}
           >
@@ -576,7 +537,7 @@ export default function DeclarationWizard({
               readOnly ||
               loading ||
               !hasValidIdentity ||
-              status !== DeclarationStatus.ASSESSED
+              status !== DECLARATION_STATUS.ASSESSED
             }
             onClick={handleSubmit}
           >
@@ -589,11 +550,11 @@ export default function DeclarationWizard({
               readOnly ||
               loading ||
               !hasValidIdentity ||
-              ![
-                DeclarationStatus.DRAFT,
-                DeclarationStatus.VERIFIED,
-                DeclarationStatus.SUBMITTED,
-              ].includes(status)
+              !(
+                status === DECLARATION_STATUS.DRAFT ||
+                status === DECLARATION_STATUS.VERIFIED ||
+                status === DECLARATION_STATUS.SUBMITTED
+              )
             }
             onClick={handleCancel}
           >
@@ -609,7 +570,7 @@ export default function DeclarationWizard({
             readOnly ||
             loading ||
             !hasValidIdentity ||
-            status !== DeclarationStatus.SUBMITTED
+            status !== DECLARATION_STATUS.SUBMITTED
           }
           onClick={handlePayment}
         >
@@ -624,7 +585,7 @@ export default function DeclarationWizard({
             readOnly ||
             loading ||
             !hasValidIdentity ||
-            status !== DeclarationStatus.PAID
+            status !== DECLARATION_STATUS.PAID
           }
           onClick={handleRelease}
         >

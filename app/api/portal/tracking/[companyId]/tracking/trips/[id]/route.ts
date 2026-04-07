@@ -1,5 +1,5 @@
 // app/api/portal/tracking/[companyId]/tracking/trips/[id]/start/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 
 /**
@@ -24,6 +24,8 @@ import { getAdminDb } from "@/lib/firebaseAdmin";
  * =========================================================
  */
 
+export const runtime = "nodejs";
+
 type TripStatus =
   | "ASSIGNED"
   | "STARTED"
@@ -31,13 +33,25 @@ type TripStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+type RouteParams = Promise<{
+  companyId: string;
+  id: string;
+}>;
+
 export async function POST(
-  _req: Request,
-  { params }: { params: { companyId: string; id: string } }
+  _req: NextRequest,
+  { params }: { params: RouteParams }
 ) {
   try {
-    const { companyId, id } = params;
+    const { companyId, id } = await params;
     const adminDb = getAdminDb();
+
+    if (!companyId || !id) {
+      return NextResponse.json(
+        { error: "Missing companyId or id" },
+        { status: 400 }
+      );
+    }
 
     const tripRef = adminDb
       .collection("companies")

@@ -13,27 +13,41 @@ const allowedTransitions: Record<string, string[]> = {
   CANCELLED: [],
 };
 
+type RouteParams = Promise<{
+  slug: string;
+  id: string;
+}>;
+
 export async function POST(
   req: Request,
-  { params }: { params: { slug: string; id: string } }
+  { params }: { params: RouteParams }
 ) {
   try {
-    const { slug, id } = params;
+    const { slug, id } = await params;
 
     if (!slug || !id) {
       return NextResponse.json({ error: "Missing slug/id" }, { status: 400 });
     }
 
-    const body = await req.json();
-    const toStatus: string = body?.toStatus;
+    const body = await req.json().catch(() => ({}));
+    const toStatus =
+      typeof body?.toStatus === "string" ? body.toStatus.trim().toUpperCase() : "";
 
     if (!toStatus) {
       return NextResponse.json({ error: "Missing toStatus" }, { status: 400 });
     }
 
-    const role: string = body?.role || "unknown";
-    const actorUid: string = body?.actorUid || "unknown";
-    const meta: any = body?.meta || {};
+    const role =
+      typeof body?.role === "string" && body.role.trim()
+        ? body.role.trim()
+        : "unknown";
+
+    const actorUid =
+      typeof body?.actorUid === "string" && body.actorUid.trim()
+        ? body.actorUid.trim()
+        : "unknown";
+
+    const meta = body?.meta ?? {};
 
     const db = getAdminDb();
     const ref = db
@@ -53,7 +67,11 @@ export async function POST(
 
       const now = new Date();
 
-      const patch: any = { status: toStatus, updatedAt: now };
+      const patch: Record<string, any> = {
+        status: toStatus,
+        updatedAt: now,
+      };
+
       if (toStatus === "SUBMITTED") patch.submittedAt = now;
       if (toStatus === "PAID") patch.paidAt = now;
       if (toStatus === "RELEASED") patch.releasedAt = now;
@@ -61,7 +79,6 @@ export async function POST(
 
       tx.set(ref, patch, { merge: true });
 
-      // Server audit log (source of truth)
       const auditRef = ref.collection("audit").doc();
       tx.set(auditRef, {
         action: "STATUS_CHANGE",

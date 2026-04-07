@@ -1,6 +1,6 @@
 // services/shipmentService.ts
 
-import { ShipmentStatus } from "@/types/declarationStatus";
+import type { ShipmentStatus } from "@/types/declarationStatus";
 
 export interface Shipment {
   id: string;
@@ -17,23 +17,14 @@ export interface Shipment {
 const STATUS_TRANSITIONS: Readonly<
   Record<ShipmentStatus, readonly ShipmentStatus[]>
 > = Object.freeze({
-  [ShipmentStatus.CREATED]: [
-    ShipmentStatus.DOCUMENTS_UPLOADED,
-    ShipmentStatus.CANCELLED,
-  ],
-  [ShipmentStatus.DOCUMENTS_UPLOADED]: [
-    ShipmentStatus.UNDER_REVIEW,
-    ShipmentStatus.CANCELLED,
-  ],
-  [ShipmentStatus.UNDER_REVIEW]: [
-    ShipmentStatus.APPROVED,
-    ShipmentStatus.REJECTED,
-  ],
-  [ShipmentStatus.APPROVED]: [ShipmentStatus.IN_TRANSIT],
-  [ShipmentStatus.IN_TRANSIT]: [ShipmentStatus.CLEARED],
-  [ShipmentStatus.CLEARED]: [],
-  [ShipmentStatus.REJECTED]: [],
-  [ShipmentStatus.CANCELLED]: [],
+  CREATED: ["DOCUMENTS_UPLOADED", "CANCELLED"],
+  DOCUMENTS_UPLOADED: ["UNDER_REVIEW", "CANCELLED"],
+  UNDER_REVIEW: ["APPROVED", "REJECTED"],
+  APPROVED: ["IN_TRANSIT"],
+  IN_TRANSIT: ["CLEARED"],
+  CLEARED: [],
+  REJECTED: [],
+  CANCELLED: [],
 });
 
 /**
@@ -49,9 +40,7 @@ export function canTransition(
 /**
  * Get allowed next statuses (used by UI / admin actions)
  */
-export function getNextStatuses(
-  status: ShipmentStatus
-): ShipmentStatus[] {
+export function getNextStatuses(status: ShipmentStatus): ShipmentStatus[] {
   return [...(STATUS_TRANSITIONS[status] ?? [])];
 }
 

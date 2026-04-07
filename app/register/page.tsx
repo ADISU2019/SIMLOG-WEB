@@ -9,6 +9,8 @@
 // - checks whether the requested transiter slug already exists
 // - creates a transiter company record in Firestore
 // - creates a user profile linked to that transiter
+// - cleans up auth user if Firestore write fails
+// - shows the real Firebase/Firestore error on screen for debugging
 // - redirects the new transiter to their dashboard
 //
 // ROUTE:
@@ -19,9 +21,12 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createUserWithEmailAndPassword } from "firebase/auth";
 import {
-  collection,
+  createUserWithEmailAndPassword,
+  deleteUser,
+  signOut,
+} from "firebase/auth";
+import {
   doc,
   getDoc,
   serverTimestamp,
@@ -36,6 +41,36 @@ function slugify(input: string) {
     .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
+}
+
+function getFriendlyErrorMessage(error: any) {
+  const code = error?.code || "";
+  const message = error?.message || "Registration failed. Please try again.";
+
+  switch (code) {
+    case "auth/email-already-in-use":
+      return "This email is already registered.";
+    case "auth/invalid-email":
+      return "Please enter a valid email address.";
+    case "auth/weak-password":
+      return "Password is too weak.";
+    case "auth/operation-not-allowed":
+      return "Email/password sign-in is not enabled in Firebase Authentication.";
+    case "auth/network-request-failed":
+      return "Network error. Please check your internet connection and try again.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please wait a moment and try again.";
+    case "auth/configuration-not-found":
+      return "Firebase Authentication is not configured correctly.";
+    case "auth/unauthorized-domain":
+      return "This domain is not authorized in Firebase Authentication.";
+    case "permission-denied":
+      return "Firestore permission denied. Please check Firestore security rules.";
+    case "unavailable":
+      return "Firebase service is temporarily unavailable. Please try again.";
+    default:
+      return code ? `${code}: ${message}` : message;
+  }
 }
 
 export default function RegisterPage() {
@@ -65,7 +100,7 @@ export default function RegisterPage() {
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedPhone = phone.trim();
     const normalizedDescription = description.trim();
-    const normalizedSlug = finalSlug;
+    const normalizedSlug = slugify(finalSlug);
 
     if (!normalizedCompanyName) {
       setError("Please enter your transiter company name.");
@@ -87,8 +122,12 @@ export default function RegisterPage() {
       return;
     }
 
+    let createdAuthUser = null;
+
     try {
       setSubmitting(true);
+
+      console.log("REGISTER STEP 1: checking slug", normalizedSlug);
 
       // 1. Check whether transiter slug already exists
       const transiterRef = doc(db, "transiters", normalizedSlug);
@@ -96,9 +135,10 @@ export default function RegisterPage() {
 
       if (existingTransiter.exists()) {
         setError("This workspace slug is already in use. Please choose another.");
-        setSubmitting(false);
         return;
       }
+
+      console.log("REGISTER STEP 2: creating auth user", normalizedEmail);
 
       // 2. Create auth user
       const userCred = await createUserWithEmailAndPassword(
@@ -107,7 +147,10 @@ export default function RegisterPage() {
         password
       );
 
+      createdAuthUser = userCred.user;
       const uid = userCred.user.uid;
+
+      console.log("REGISTER STEP 3: creating transiter doc", normalizedSlug);
 
       // 3. Create transiter company document
       await setDoc(transiterRef, {
@@ -125,15 +168,20 @@ export default function RegisterPage() {
         updatedAt: serverTimestamp(),
       });
 
+      console.log("REGISTER STEP 4: creating user profile", uid);
+
       // 4. Create user profile document
       await setDoc(doc(db, "users", uid), {
         email: normalizedEmail,
         role: "transiter_admin",
         transiterId: normalizedSlug,
         companyName: normalizedCompanyName,
+        phone: normalizedPhone || "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      console.log("REGISTER STEP 5: success");
 
       setSuccessMessage(
         "Subscription successful. Opening your transiter dashboard..."
@@ -141,17 +189,22 @@ export default function RegisterPage() {
 
       router.push(`/portal/${normalizedSlug}/dashboard`);
     } catch (error: any) {
-      console.error(error);
+      console.error("REGISTER ERROR OBJECT:", error);
+      console.error("REGISTER ERROR CODE:", error?.code);
+      console.error("REGISTER ERROR MESSAGE:", error?.message);
 
-      if (error?.code === "auth/email-already-in-use") {
-        setError("This email is already registered.");
-      } else if (error?.code === "auth/invalid-email") {
-        setError("Please enter a valid email address.");
-      } else if (error?.code === "auth/weak-password") {
-        setError("Password is too weak.");
-      } else {
-        setError("Registration failed. Please try again.");
+      // Cleanup auth user if auth succeeded but Firestore failed
+      if (createdAuthUser) {
+        try {
+          console.warn("REGISTER CLEANUP: deleting partially created auth user");
+          await deleteUser(createdAuthUser);
+          await signOut(auth);
+        } catch (cleanupError: any) {
+          console.error("REGISTER CLEANUP FAILED:", cleanupError);
+        }
       }
+
+      setError(getFriendlyErrorMessage(error));
     } finally {
       setSubmitting(false);
     }

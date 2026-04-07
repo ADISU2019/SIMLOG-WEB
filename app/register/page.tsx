@@ -1,21 +1,4 @@
 // app/register/page.tsx
-// TRANSITER SUBSCRIPTION PAGE
-// PURPOSE:
-// This page allows a new transiter company to subscribe, create an account,
-// and become available inside the Transiter Hub.
-//
-// WHAT THIS PAGE DOES:
-// - creates a Firebase Auth user
-// - checks whether the requested transiter slug already exists
-// - creates a transiter company record in Firestore
-// - creates a user profile linked to that transiter
-// - cleans up auth user if Firestore write fails
-// - shows the real Firebase/Firestore error on screen for debugging
-// - redirects the new transiter to their dashboard
-//
-// ROUTE:
-// /register
-
 "use client";
 
 import Link from "next/link";
@@ -26,12 +9,7 @@ import {
   deleteUser,
   signOut,
 } from "firebase/auth";
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
 function slugify(input: string) {
@@ -93,6 +71,8 @@ export default function RegisterPage() {
   const register = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    if (submitting) return;
+
     setError("");
     setSuccessMessage("");
 
@@ -122,14 +102,13 @@ export default function RegisterPage() {
       return;
     }
 
-    let createdAuthUser = null;
+    let createdAuthUser: any = null;
 
     try {
       setSubmitting(true);
 
       console.log("REGISTER STEP 1: checking slug", normalizedSlug);
 
-      // 1. Check whether transiter slug already exists
       const transiterRef = doc(db, "transiters", normalizedSlug);
       const existingTransiter = await getDoc(transiterRef);
 
@@ -140,7 +119,6 @@ export default function RegisterPage() {
 
       console.log("REGISTER STEP 2: creating auth user", normalizedEmail);
 
-      // 2. Create auth user
       const userCred = await createUserWithEmailAndPassword(
         auth,
         normalizedEmail,
@@ -152,7 +130,6 @@ export default function RegisterPage() {
 
       console.log("REGISTER STEP 3: creating transiter doc", normalizedSlug);
 
-      // 3. Create transiter company document
       await setDoc(transiterRef, {
         name: normalizedCompanyName,
         slug: normalizedSlug,
@@ -170,7 +147,6 @@ export default function RegisterPage() {
 
       console.log("REGISTER STEP 4: creating user profile", uid);
 
-      // 4. Create user profile document
       await setDoc(doc(db, "users", uid), {
         email: normalizedEmail,
         role: "transiter_admin",
@@ -193,7 +169,6 @@ export default function RegisterPage() {
       console.error("REGISTER ERROR CODE:", error?.code);
       console.error("REGISTER ERROR MESSAGE:", error?.message);
 
-      // Cleanup auth user if auth succeeded but Firestore failed
       if (createdAuthUser) {
         try {
           console.warn("REGISTER CLEANUP: deleting partially created auth user");

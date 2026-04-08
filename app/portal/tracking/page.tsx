@@ -1,9 +1,8 @@
-// app/portal/tracking/page.tsx
 "use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, limit, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 /**
@@ -14,6 +13,12 @@ import { db } from "@/lib/firebase";
 type WorkspaceDoc = {
   name?: string;
   isActive?: boolean;
+};
+
+type WorkspaceItem = {
+  id: string;
+  name: string;
+  isActive: boolean;
 };
 
 function Card({
@@ -150,9 +155,7 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 }
 
 export default function TrackingWorkspaceHubPage() {
-  const safeCompanyId = "tracking";
-
-  const [workspaceName, setWorkspaceName] = useState("Tracking Workspace");
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -164,50 +167,48 @@ export default function TrackingWorkspaceHubPage() {
       setNotice(null);
 
       try {
-        const ref = doc(db, "companies", safeCompanyId);
-        const snap = await getDoc(ref);
+        const q = query(collection(db, "companies"), limit(50));
+        const snap = await getDocs(q);
 
         if (cancelled) return;
 
-        if (!snap.exists()) {
-          setWorkspaceName("Tracking Workspace");
-          setNotice("Workspace not found in companies collection.");
-          return;
-        }
+        const items: WorkspaceItem[] = snap.docs.map((d) => {
+          const data = d.data() as WorkspaceDoc;
+          const nm = typeof data?.name === "string" ? data.name.trim() : "";
+          return {
+            id: d.id,
+            name: nm || d.id,
+            isActive: data?.isActive !== false,
+          };
+        });
 
-        const data = snap.data() as WorkspaceDoc;
-        const nm = typeof data?.name === "string" ? data.name.trim() : "";
-        setWorkspaceName(nm || "Tracking Workspace");
+        setWorkspaces(items);
 
-        if (data?.isActive === false) {
-          setNotice("This workspace is not active (isActive: false).");
+        if (items.length === 0) {
+          setNotice("No workspaces found in companies collection.");
         }
       } catch (e: unknown) {
         if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Failed to load workspace";
+        const msg = e instanceof Error ? e.message : "Failed to load workspaces";
         setNotice(msg);
+        setWorkspaces([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     load();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const routes = useMemo(() => {
-    const base = `/portal/tracking/${safeCompanyId}`;
-    return {
-      dispatcher: `${base}/tracking`,
-      driver: `${base}/driver`,
-      fuel: `${base}/reports/fuel`,
-      trucks: `${base}/tracking`,
-      drivers: `${base}/tracking`,
-      cashier: `${base}/tracking/cashier`,
-    };
-  }, [safeCompanyId]);
+  const totalWorkspaces = useMemo(() => workspaces.length, [workspaces]);
+  const activeWorkspaces = useMemo(
+    () => workspaces.filter((w) => w.isActive).length,
+    [workspaces]
+  );
 
   return (
     <main
@@ -280,8 +281,8 @@ export default function TrackingWorkspaceHubPage() {
                   </div>
 
                   <div style={{ fontSize: 16, opacity: 0.92, lineHeight: 1.6 }}>
-                    Choose where you want to go next (Trips · Drivers · Fuel ·
-                    Reports · Cashier).
+                    Select a real company workspace first. Then open Trips,
+                    Driver Flow, Fuel Reports, or Cashier.
                   </div>
 
                   <div
@@ -330,10 +331,13 @@ export default function TrackingWorkspaceHubPage() {
 
                 <div style={{ display: "grid", gap: 12, minWidth: 280 }}>
                   <MiniStat
-                    label="Workspace"
-                    value={loading ? "Loading…" : workspaceName}
+                    label="Workspaces"
+                    value={loading ? "Loading…" : String(totalWorkspaces)}
                   />
-                  <MiniStat label="Company ID" value={safeCompanyId || "-"} />
+                  <MiniStat
+                    label="Active"
+                    value={loading ? "Loading…" : String(activeWorkspaces)}
+                  />
                 </div>
               </div>
             </div>
@@ -369,7 +373,7 @@ export default function TrackingWorkspaceHubPage() {
                 color: "#0f172a",
               }}
             >
-              Modules
+              Company Workspaces
             </div>
             <div
               style={{
@@ -379,63 +383,63 @@ export default function TrackingWorkspaceHubPage() {
                 color: "#0f172a",
               }}
             >
-              This module is independent from transiters. Pick where you want to
-              go next.
+              Pick a real company id from the companies collection. This fixes the
+              bad `/tracking/tracking/tracking` route problem.
             </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: 16,
-            }}
-          >
-            <Card
-              title="Trips Dashboard"
-              subtitle="Create trips, view statuses, check-ins, fuel summary and costs."
-              href={routes.dispatcher}
-              gradient="linear-gradient(135deg, #0ea5e9 0%, #2563eb 55%, #7c3aed 100%)"
-              icon="🚛"
-              pill="Dispatcher"
-            />
-
-            <Card
-              title="Driver Flow"
-              subtitle="Find trip by code → start → check-in + fuel → complete."
-              href={routes.driver}
-              gradient="linear-gradient(135deg, #10b981 0%, #22c55e 45%, #14b8a6 100%)"
-              icon="👤"
-              pill="Driver"
-            />
-
-            <Card
-              title="Fuel Reports"
-              subtitle="Run fuel accountability report (DD-MM-YYYY) with totals and flags."
-              href={routes.fuel}
-              gradient="linear-gradient(135deg, #f97316 0%, #f59e0b 55%, #fb7185 100%)"
-              icon="⛽"
-              pill="Phase 4"
-            />
-
-            <Card
-              title="Trucks & Drivers"
-              subtitle="Manage trucks/drivers. If you don’t have separate pages yet, use the Trips Dashboard."
-              href={routes.dispatcher}
-              gradient="linear-gradient(135deg, #111827 0%, #374151 55%, #0f172a 100%)"
-              icon="🗂️"
-              pill="Setup"
-            />
-
-            <Card
-              title="Cashier"
-              subtitle="Accept cash payments, upload receipts, and confirm ETB trip transactions."
-              href={routes.cashier}
-              gradient="linear-gradient(135deg, #10b981 0%, #14b8a6 48%, #0891b2 100%)"
-              icon="🧾"
-              pill="Finance"
-            />
-          </div>
+          {loading ? (
+            <div
+              style={{
+                borderRadius: 22,
+                padding: 20,
+                background: "white",
+                border: "1px solid rgba(0,0,0,0.08)",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.06)",
+                fontWeight: 950,
+              }}
+            >
+              Loading workspaces…
+            </div>
+          ) : workspaces.length === 0 ? (
+            <div
+              style={{
+                borderRadius: 22,
+                padding: 20,
+                background: "white",
+                border: "1px solid rgba(0,0,0,0.08)",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.06)",
+                fontWeight: 950,
+              }}
+            >
+              No company workspaces found.
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 16,
+              }}
+            >
+              {workspaces.map((ws) => {
+                const base = `/portal/tracking/${ws.id}`;
+                return (
+                  <Card
+                    key={ws.id}
+                    title={ws.name}
+                    subtitle={`Company ID: ${ws.id} · ${
+                      ws.isActive ? "Active" : "Inactive"
+                    } · Open trips dashboard for this workspace.`}
+                    href={`${base}/tracking`}
+                    gradient="linear-gradient(135deg, #0ea5e9 0%, #2563eb 55%, #7c3aed 100%)"
+                    icon="🚛"
+                    pill={ws.isActive ? "Workspace" : "Inactive"}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
     </main>

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 
-type TripStatus = "ASSIGNED" | "STARTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+type TripStatus =
+  | "ASSIGNED"
+  | "STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED";
 
 type TripRow = {
   id: string;
@@ -45,6 +50,15 @@ function fmtIso(iso?: string | null) {
   }
 }
 
+function normalizeCompanyId(input: string) {
+  return String(input || "").trim();
+}
+
+function isInvalidCompanyId(input: string) {
+  const v = normalizeCompanyId(input);
+  return !v || v.toLowerCase() === "tracking";
+}
+
 function StatusPill({ status }: { status: TripStatus }) {
   const map: Record<TripStatus, { bg: string; label: string }> = {
     ASSIGNED: { bg: "rgba(245,158,11,0.14)", label: "ASSIGNED" },
@@ -84,8 +98,66 @@ async function copyText(text: string) {
   }
 }
 
-export default function TrackingTripsDashboardClient({ companyId }: { companyId: string }) {
-  const base = useMemo(() => `/portal/tracking/${companyId}`, [companyId]);
+async function fetchWithCompanyFallback(
+  companyId: string,
+  pathAfterTracking: string,
+  init?: RequestInit
+) {
+  const normalizedCompanyId = normalizeCompanyId(companyId);
+
+  const urls = [
+    `/api/portal/tracking/${normalizedCompanyId}/tracking/${pathAfterTracking}`,
+    `/api/portal/${normalizedCompanyId}/tracking/${pathAfterTracking}`,
+  ];
+
+  let lastErrorText = "";
+  let lastStatus = 0;
+
+  for (const url of urls) {
+    try {
+      console.log("API request:", url);
+
+      const res = await fetch(url, {
+        cache: "no-store",
+        ...init,
+      });
+
+      if (res.ok) {
+        return res;
+      }
+
+      const text = await res.text().catch(() => "");
+      lastErrorText = text;
+      lastStatus = res.status;
+
+      if (res.status === 404) {
+        continue;
+      }
+
+      throw new Error(text || `Request failed (${res.status})`);
+    } catch (err) {
+      if (url === urls[urls.length - 1]) {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(lastErrorText || `Request failed (${lastStatus || 404})`);
+}
+
+export default function TrackingTripsDashboardClient({
+  companyId,
+}: {
+  companyId: string;
+}) {
+  const safeCompanyId = useMemo(() => normalizeCompanyId(companyId), [companyId]);
+
+  console.log("TrackingTripsDashboardClient companyId:", safeCompanyId);
+
+  const base = useMemo(
+    () => `/portal/tracking/${safeCompanyId}`,
+    [safeCompanyId]
+  );
   const hrefHub = useMemo(() => `${base}`, [base]);
   const hrefDriver = useMemo(() => `${base}/driver`, [base]);
   const hrefFuel = useMemo(() => `${base}/reports/fuel`, [base]);
@@ -109,17 +181,23 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
   const [agreedCost, setAgreedCost] = useState<string>("");
 
   async function loadTrips() {
-    if (!companyId) return;
+    if (isInvalidCompanyId(safeCompanyId)) {
+      setRows([]);
+      setNotice("Invalid companyId. Please open a valid workspace.");
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setNotice(null);
 
     try {
-      const res = await fetch(`/api/portal/tracking/${companyId}/tracking/trips/list?limit=50`, {
-        cache: "no-store",
-      });
-      const json = await res.json().catch(() => ({} as any));
-      if (!res.ok) throw new Error(json?.error ?? `Failed to load trips (${res.status})`);
+      const res = await fetchWithCompanyFallback(
+        safeCompanyId,
+        "trips/list?limit=50"
+      );
 
+      const json = await res.json().catch(() => ({} as any));
       setRows(Array.isArray(json?.rows) ? json.rows : []);
     } catch (e: unknown) {
       setRows([]);
@@ -132,12 +210,18 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
   useEffect(() => {
     loadTrips();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [safeCompanyId]);
 
   async function createTrip() {
+    if (creating) return;
+
     setNotice(null);
     setCreatedCode(null);
     setCreatedTripId(null);
+
+    if (isInvalidCompanyId(safeCompanyId)) {
+      return setNotice("Invalid companyId. Please open a valid workspace.");
+    }
 
     // light validation
     if (!truckPlate.trim()) return setNotice("Truck Plate is required.");
@@ -145,11 +229,16 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
     if (!startCity.trim()) return setNotice("Start City is required.");
     if (!destinationCity.trim()) return setNotice("Destination City is required.");
     if (!loadType.trim()) return setNotice("Load Type is required.");
-    if (!agreedCost.trim() || !Number.isFinite(Number(agreedCost)) || Number(agreedCost) < 0) {
+    if (
+      !agreedCost.trim() ||
+      !Number.isFinite(Number(agreedCost)) ||
+      Number(agreedCost) < 0
+    ) {
       return setNotice("Agreed Cost must be a valid non-negative number.");
     }
 
     setCreating(true);
+
     try {
       const payload: any = {
         truckPlate: truckPlate.trim(),
@@ -161,21 +250,25 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
       };
 
       const lw = loadWeight.trim() ? Number(loadWeight) : undefined;
-      if (typeof lw === "number" && Number.isFinite(lw)) payload.loadWeight = lw;
+      if (typeof lw === "number" && Number.isFinite(lw)) {
+        payload.loadWeight = lw;
+      }
 
-      const res = await fetch(`/api/portal/tracking/${companyId}/tracking/trips/create`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetchWithCompanyFallback(
+        safeCompanyId,
+        "trips/create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const json = await res.json().catch(() => ({} as any));
-      if (!res.ok) throw new Error(json?.error ?? `Failed to create trip (${res.status})`);
 
       setCreatedCode(String(json.tripCode ?? ""));
       setCreatedTripId(String(json.tripId ?? ""));
 
-      // reset form (keep it clean)
       setTruckPlate("");
       setDriverName("");
       setStartCity("");
@@ -192,12 +285,23 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
     }
   }
 
-  if (!companyId) {
+  if (isInvalidCompanyId(safeCompanyId)) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+        }}
+      >
         <div style={{ maxWidth: 720 }}>
-          <div style={{ fontSize: 26, fontWeight: 1000 }}>Missing companyId</div>
-          <div style={{ marginTop: 10, opacity: 0.8 }}>Go back to Workspaces and select your company.</div>
+          <div style={{ fontSize: 26, fontWeight: 1000 }}>
+            Invalid companyId
+          </div>
+          <div style={{ marginTop: 10, opacity: 0.8 }}>
+            The route did not provide a valid company workspace ID.
+          </div>
           <div style={{ marginTop: 16 }}>
             <Link href="/portal/tracking" style={{ fontWeight: 950 }}>
               ← Back to Workspaces
@@ -209,7 +313,12 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fafc 0%,#fff 35%,#f8fafc 100%)" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(180deg,#f8fafc 0%,#fff 35%,#f8fafc 100%)",
+      }}
+    >
       {/* Header */}
       <section style={{ padding: "34px 18px 16px" }}>
         <div style={{ maxWidth: 1240, margin: "0 auto" }}>
@@ -218,19 +327,36 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
               borderRadius: 26,
               padding: 22,
               border: "1px solid rgba(0,0,0,0.08)",
-              background: "linear-gradient(135deg,#0ea5e9 0%,#2563eb 45%,#7c3aed 100%)",
+              background:
+                "linear-gradient(135deg,#0ea5e9 0%,#2563eb 45%,#7c3aed 100%)",
               boxShadow: "0 18px 52px rgba(0,0,0,0.10)",
               color: "white",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ fontSize: 46, fontWeight: 1000, letterSpacing: 0.2 }}>Trips Dashboard</div>
+                <div style={{ fontSize: 46, fontWeight: 1000, letterSpacing: 0.2 }}>
+                  Trips Dashboard
+                </div>
                 <div style={{ opacity: 0.92 }}>
-                  Company: <b>{companyId}</b>
+                  Company: <b>{safeCompanyId}</b>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginTop: 8,
+                  }}
+                >
                   <Link
                     href={hrefHub}
                     style={{
@@ -332,23 +458,88 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
               boxShadow: "0 14px 36px rgba(0,0,0,0.08)",
             }}
           >
-            <div style={{ fontSize: 22, fontWeight: 1000 }}>Create Trip (Dispatcher)</div>
-            <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8, fontWeight: 900 }}>
-              Generates a <b>Trip Code</b> (stored as hash only). Share the code with the driver.
+            <div style={{ fontSize: 22, fontWeight: 1000 }}>
+              Create Trip (Dispatcher)
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 13,
+                opacity: 0.8,
+                fontWeight: 900,
+              }}
+            >
+              Generates a <b>Trip Code</b> (stored as hash only). Share the code
+              with the driver.
             </div>
 
-            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>
-              <input value={truckPlate} onChange={(e) => setTruckPlate(e.target.value)} placeholder="Truck Plate *" style={inputStyle} />
-              <input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Driver Name *" style={inputStyle} />
-              <input value={startCity} onChange={(e) => setStartCity(e.target.value)} placeholder="Start City *" style={inputStyle} />
-              <input value={destinationCity} onChange={(e) => setDestinationCity(e.target.value)} placeholder="Destination City *" style={inputStyle} />
-              <input value={loadType} onChange={(e) => setLoadType(e.target.value)} placeholder="Load Type *" style={inputStyle} />
-              <input value={loadWeight} onChange={(e) => setLoadWeight(e.target.value)} placeholder="Load Weight (optional)" inputMode="numeric" style={inputStyle} />
-              <input value={agreedCost} onChange={(e) => setAgreedCost(e.target.value)} placeholder="Agreed Cost *" inputMode="numeric" style={inputStyle} />
+            <div
+              style={{
+                marginTop: 14,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))",
+                gap: 12,
+              }}
+            >
+              <input
+                value={truckPlate}
+                onChange={(e) => setTruckPlate(e.target.value)}
+                placeholder="Truck Plate *"
+                style={inputStyle}
+              />
+              <input
+                value={driverName}
+                onChange={(e) => setDriverName(e.target.value)}
+                placeholder="Driver Name *"
+                style={inputStyle}
+              />
+              <input
+                value={startCity}
+                onChange={(e) => setStartCity(e.target.value)}
+                placeholder="Start City *"
+                style={inputStyle}
+              />
+              <input
+                value={destinationCity}
+                onChange={(e) => setDestinationCity(e.target.value)}
+                placeholder="Destination City *"
+                style={inputStyle}
+              />
+              <input
+                value={loadType}
+                onChange={(e) => setLoadType(e.target.value)}
+                placeholder="Load Type *"
+                style={inputStyle}
+              />
+              <input
+                value={loadWeight}
+                onChange={(e) => setLoadWeight(e.target.value)}
+                placeholder="Load Weight (optional)"
+                inputMode="numeric"
+                style={inputStyle}
+              />
+              <input
+                value={agreedCost}
+                onChange={(e) => setAgreedCost(e.target.value)}
+                placeholder="Agreed Cost *"
+                inputMode="numeric"
+                style={inputStyle}
+              />
             </div>
 
-            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button onClick={createTrip} disabled={creating} style={primaryBtnStyle(creating)}>
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                onClick={createTrip}
+                disabled={creating}
+                style={primaryBtnStyle(creating)}
+              >
                 {creating ? "Creating…" : "➕ Create Trip"}
               </button>
 
@@ -379,9 +570,20 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
                 }}
               >
                 ✅ Trip created.
-                <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
                   <span>
-                    Trip Code: <code style={{ fontWeight: 1000, fontSize: 16 }}>{createdCode}</code>
+                    Trip Code:{" "}
+                    <code style={{ fontWeight: 1000, fontSize: 16 }}>
+                      {createdCode}
+                    </code>
                   </span>
                   <button
                     onClick={async () => {
@@ -399,7 +601,9 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
                   >
                     Copy
                   </button>
-                  {createdTripId ? <span style={{ opacity: 0.85 }}>Trip ID: {createdTripId}</span> : null}
+                  {createdTripId ? (
+                    <span style={{ opacity: 0.85 }}>Trip ID: {createdTripId}</span>
+                  ) : null}
                 </div>
                 <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>
                   Share this Trip Code with the driver to use in Driver Flow.
@@ -422,18 +626,38 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
               boxShadow: "0 14px 36px rgba(0,0,0,0.08)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <div>
-                <div style={{ fontSize: 24, fontWeight: 1000 }}>Recent Trips</div>
-                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8, fontWeight: 900 }}>
-                  Shows last updated trips (requires updatedAt to be present).
+                <div style={{ fontSize: 24, fontWeight: 1000 }}>
+                  Recent Trips
+                </div>
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 13,
+                    opacity: 0.8,
+                    fontWeight: 900,
+                  }}
+                >
+                  Shows last updated trips.
                 </div>
               </div>
-              <div style={{ fontWeight: 950, opacity: 0.8 }}>{rows.length} trip(s)</div>
+              <div style={{ fontWeight: 950, opacity: 0.8 }}>
+                {rows.length} trip(s)
+              </div>
             </div>
 
             {loading ? (
-              <div style={{ marginTop: 14, fontSize: 16, fontWeight: 950 }}>Loading…</div>
+              <div style={{ marginTop: 14, fontSize: 16, fontWeight: 950 }}>
+                Loading…
+              </div>
             ) : rows.length === 0 ? (
               <div style={{ marginTop: 14, fontSize: 15, opacity: 0.85 }}>
                 No trips yet. Create your first trip above.
@@ -460,7 +684,9 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
                         <td style={td}>
                           <div style={{ display: "grid", gap: 6 }}>
                             <StatusPill status={r.status} />
-                            <span style={{ fontSize: 12, opacity: 0.75 }}>ID: {r.id.slice(0, 8)}…</span>
+                            <span style={{ fontSize: 12, opacity: 0.75 }}>
+                              ID: {r.id.slice(0, 8)}…
+                            </span>
                           </div>
                         </td>
                         <td style={tdStrong}>{r.truckPlate}</td>
@@ -468,22 +694,30 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
                         <td style={td}>{r.route}</td>
                         <td style={td}>
                           {r.loadType}
-                          {typeof r.loadWeight === "number" ? ` · ${r.loadWeight}` : ""}
+                          {typeof r.loadWeight === "number"
+                            ? ` · ${r.loadWeight}`
+                            : ""}
                         </td>
                         <td style={tdStrong}>{money(r.agreedCost)}</td>
                         <td style={td}>
                           <div style={{ display: "grid", gap: 6 }}>
-                            <div style={{ fontWeight: 950 }}>{r.lastCheckinCity ?? "-"}</div>
-                            <div style={{ fontSize: 12, opacity: 0.75 }}>{fmtIso(r.lastCheckinAt)}</div>
+                            <div style={{ fontWeight: 950 }}>
+                              {r.lastCheckinCity ?? "-"}
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.75 }}>
+                              {fmtIso(r.lastCheckinAt)}
+                            </div>
                           </div>
                         </td>
                         <td style={td}>
                           <div style={{ display: "grid", gap: 6 }}>
                             <div style={{ fontWeight: 950 }}>
-                              {r.totalFuelUsedLiters ?? 0} L · {money(r.totalExtraCost ?? 0)}
+                              {r.totalFuelUsedLiters ?? 0} L ·{" "}
+                              {money(r.totalExtraCost ?? 0)}
                             </div>
                             <div style={{ fontSize: 12, opacity: 0.75 }}>
-                              Flags: {Array.isArray(r.fuelFlags) ? r.fuelFlags.length : 0}
+                              Flags:{" "}
+                              {Array.isArray(r.fuelFlags) ? r.fuelFlags.length : 0}
                             </div>
                           </div>
                         </td>
@@ -494,7 +728,8 @@ export default function TrackingTripsDashboardClient({ companyId }: { companyId:
                 </table>
 
                 <div style={{ marginTop: 12, fontSize: 13, opacity: 0.75 }}>
-                  Next improvement: add a Trip Details page (timeline + check-ins) and link from the table.
+                  Next improvement: add a Trip Details page (timeline +
+                  check-ins) and link from the table.
                 </div>
               </div>
             )}
@@ -521,7 +756,9 @@ function primaryBtnStyle(disabled: boolean): React.CSSProperties {
     cursor: disabled ? "not-allowed" : "pointer",
     fontWeight: 950,
     color: "white",
-    background: disabled ? "rgba(148,163,184,0.55)" : "linear-gradient(135deg,#2563eb 0%,#7c3aed 100%)",
+    background: disabled
+      ? "rgba(148,163,184,0.55)"
+      : "linear-gradient(135deg,#2563eb 0%,#7c3aed 100%)",
     boxShadow: "0 14px 30px rgba(37,99,235,0.18)",
   };
 }

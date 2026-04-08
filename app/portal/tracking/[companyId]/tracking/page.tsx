@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import { exportToExcel, exportToPdf } from "../../../../lib/exports";
 import QRCode from "qrcode";
 
@@ -70,6 +71,15 @@ type LookupTrip = {
 
 function normalizeCode(input: string) {
   return String(input).trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizeCompanyId(input: unknown) {
+  return String(input ?? "").trim();
+}
+
+function isInvalidCompanyId(input: unknown) {
+  const v = normalizeCompanyId(input);
+  return !v || v.toLowerCase() === "tracking";
 }
 
 function money(v: unknown) {
@@ -277,16 +287,64 @@ Your truck trip has been verified by dispatcher.`;
   return true;
 }
 
-export default function TrackingTripsDashboardPage({
-  params,
-}: {
-  params: Promise<{ companyId: string }>;
-}) {
-  const { companyId: rawCompanyId } = React.use(params);
+async function fetchJsonWithTrackingFallback(
+  companyId: string,
+  pathAfterTracking: string,
+  init?: RequestInit
+) {
+  const cid = normalizeCompanyId(companyId);
 
+  if (isInvalidCompanyId(cid)) {
+    throw new Error(`Invalid companyId: "${cid || "(empty)"}"`);
+  }
+
+  const urls = [
+    `/api/portal/tracking/${cid}/tracking/${pathAfterTracking}`,
+    `/api/portal/${cid}/tracking/${pathAfterTracking}`,
+  ];
+
+  let lastError = "Request failed";
+
+  for (const url of urls) {
+    try {
+      console.log("Trying API URL:", url);
+
+      const res = await fetch(url, {
+        cache: "no-store",
+        ...init,
+      });
+
+      const text = await res.text().catch(() => "");
+      const data = text ? JSON.parse(text) : {};
+
+      if (res.ok) return data;
+
+      const message =
+        (data as any)?.error ||
+        (data as any)?.message ||
+        text ||
+        `Request failed (${res.status})`;
+
+      lastError = message;
+
+      if (res.status === 404) continue;
+
+      throw new Error(message);
+    } catch (err) {
+      if (url === urls[urls.length - 1]) {
+        throw err instanceof Error ? err : new Error(lastError);
+      }
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+export default function TrackingTripsDashboardPage() {
+  const params = useParams();
   const companyId = useMemo(
-    () => String(rawCompanyId ?? "").trim(),
-    [rawCompanyId]
+    () => normalizeCompanyId(params?.companyId),
+    [params]
   );
 
   const base = useMemo(() => `/portal/tracking/${companyId}`, [companyId]);
@@ -388,25 +446,22 @@ export default function TrackingTripsDashboardPage({
   );
 
   async function loadTrips() {
-    if (!companyId) return;
+    if (isInvalidCompanyId(companyId)) {
+      setRows([]);
+      setNoticeTrips(
+        `Invalid companyId received: "${companyId || "(empty)"}". Open a real workspace.`
+      );
+      return;
+    }
 
     setNoticeTrips(null);
     setLoadingTrips(true);
 
     try {
-      const res = await fetch(
-        `/api/portal/tracking/${companyId}/tracking/trips/list?limit=50`,
-        { cache: "no-store" }
+      const data = await fetchJsonWithTrackingFallback(
+        companyId,
+        "trips/list?limit=50"
       );
-
-      const data = await res.json().catch(() => ({} as Record<string, unknown>));
-
-      if (!res.ok) {
-        throw new Error(
-          (data as { error?: string })?.error ??
-            `Failed to load trips (${res.status})`
-        );
-      }
 
       const list = Array.isArray((data as { trips?: unknown[] })?.trips)
         ? ((data as { trips?: unknown[] }).trips as unknown[])
@@ -473,11 +528,12 @@ export default function TrackingTripsDashboardPage({
 
   useEffect(() => {
     loadTrips();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
   useEffect(() => {
     async function buildQrs() {
-      if (!companyId) return;
+      if (isInvalidCompanyId(companyId)) return;
       if (typeof window === "undefined") return;
 
       const next: Record<string, string> = {};
@@ -521,7 +577,10 @@ export default function TrackingTripsDashboardPage({
   }
 
   async function createTrip() {
-    if (!companyId) return;
+    if (isInvalidCompanyId(companyId)) {
+      setCreateNotice("Invalid companyId. Open a real workspace first.");
+      return;
+    }
 
     setCreateNotice(null);
     setNewCodeBanner(null);
@@ -549,24 +608,15 @@ export default function TrackingTripsDashboardPage({
         ownerTelegramChatId: ownerTelegramChatId.trim() || null,
       };
 
-      const res = await fetch(
-        `/api/portal/tracking/${companyId}/tracking/trips/create`,
+      const data = await fetchJsonWithTrackingFallback(
+        companyId,
+        "trips/create",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-          cache: "no-store",
         }
       );
-
-      const data = await res.json().catch(() => ({} as Record<string, unknown>));
-
-      if (!res.ok) {
-        throw new Error(
-          (data as { error?: string })?.error ??
-            `Failed to create trip (${res.status})`
-        );
-      }
 
       const tripId = safeId(
         (data as any)?.tripId ??
@@ -618,7 +668,10 @@ export default function TrackingTripsDashboardPage({
   }
 
   async function doLookup() {
-    if (!companyId) return;
+    if (isInvalidCompanyId(companyId)) {
+      setLookupNotice("Invalid companyId. Open a real workspace first.");
+      return;
+    }
 
     setLookupNotice(null);
     setLookupTrip(null);
@@ -633,23 +686,15 @@ export default function TrackingTripsDashboardPage({
     setLookupLoading(true);
 
     try {
-      const res = await fetch(
-        `/api/portal/tracking/${companyId}/tracking/trips/by-code`,
+      const data = await fetchJsonWithTrackingFallback(
+        companyId,
+        "trips/by-code",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code }),
-          cache: "no-store",
         }
       );
-
-      const data = await res.json().catch(() => ({} as Record<string, unknown>));
-
-      if (!res.ok) {
-        throw new Error(
-          (data as { error?: string })?.error ?? `Trip not found (${res.status})`
-        );
-      }
 
       const t = ((data as any)?.trip ?? data) as any;
 
@@ -786,7 +831,7 @@ export default function TrackingTripsDashboardPage({
     }
   }
 
-  if (!companyId) {
+  if (isInvalidCompanyId(companyId)) {
     return (
       <main
         style={{
@@ -797,9 +842,11 @@ export default function TrackingTripsDashboardPage({
         }}
       >
         <div style={{ maxWidth: 760 }}>
-          <div style={{ fontSize: 26, fontWeight: 1000 }}>Missing companyId</div>
+          <div style={{ fontSize: 26, fontWeight: 1000 }}>Invalid companyId</div>
           <div style={{ marginTop: 10, opacity: 0.8 }}>
-            Go back to Workspaces and select your company.
+            This page received:
+            <b> {companyId || "(empty)"} </b>
+            instead of a real workspace ID.
           </div>
           <div style={{ marginTop: 16 }}>
             <Link href="/portal/tracking" style={{ fontWeight: 950 }}>
@@ -1871,13 +1918,7 @@ export default function TrackingTripsDashboardPage({
               >
                 <thead>
                   <tr style={{ background: "rgba(245, 158, 11, 0.28)" }}>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>
                       <input
                         type="checkbox"
                         checked={allChecked}
@@ -1886,123 +1927,19 @@ export default function TrackingTripsDashboardPage({
                       />{" "}
                       Select
                     </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      TripType
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Status
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Payment Status
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Payment Method
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Paid Amount
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Balance
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Receipt
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Date/Time
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Agreed Cost
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Truck
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Driver
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Start City
-                    </th>
-                    <th
-                      style={{
-                        padding: 12,
-                        borderBottom: "1px solid rgba(0,0,0,0.08)",
-                        textAlign: "left",
-                      }}
-                    >
-                      Destination City
-                    </th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>TripType</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Status</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Payment Status</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Payment Method</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Paid Amount</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Balance</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Receipt</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Date/Time</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Agreed Cost</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Truck</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Driver</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Start City</th>
+                    <th style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "left" }}>Destination City</th>
                   </tr>
                 </thead>
 
@@ -2025,12 +1962,7 @@ export default function TrackingTripsDashboardPage({
 
                       return (
                         <tr key={r.id} style={{ background: bg }}>
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             <input
                               type="checkbox"
                               checked={!!selected[r.id]}
@@ -2044,74 +1976,35 @@ export default function TrackingTripsDashboardPage({
                             />
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {tripTypeLabel(r.tripType ?? null)}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             <span style={statusPill(String(r.status ?? "ASSIGNED"))}>
                               {String(r.status ?? "ASSIGNED")}
                             </span>
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             <span style={paymentStatusPill(r.payment?.status)}>
                               {paymentStatusLabel(r.payment?.status)}
                             </span>
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {paymentMethodLabel(r.payment?.method)}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {money(r.payment?.paidAmount)}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {money(r.payment?.balance)}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             {r.payment?.receiptUrl ? (
                               <a
                                 href={r.payment.receiptUrl}
@@ -2130,60 +2023,27 @@ export default function TrackingTripsDashboardPage({
                             )}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontSize: 13,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontSize: 13 }}>
                             {dt}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {money(r.agreedCost)}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                              fontWeight: 900,
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)", fontWeight: 900 }}>
                             {r.truckPlate ?? "-"}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             {r.driverName ?? "-"}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             {r.startCity ?? "-"}
                           </td>
 
-                          <td
-                            style={{
-                              padding: 12,
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          >
+                          <td style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
                             {r.destinationCity ?? "-"}
                           </td>
                         </tr>

@@ -907,13 +907,18 @@ export default function TrackingTripsDashboardPage() {
                   <span
                     style={{
                       width: "fit-content",
-                      padding: "8px 12px",
+                      minHeight: 44,
+                      padding: "0 16px",
                       borderRadius: 999,
                       background: "rgba(255,255,255,0.18)",
                       border: "1px solid rgba(255,255,255,0.24)",
                       fontSize: 12,
                       fontWeight: 950,
                       letterSpacing: 0.35,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
                     }}
                   >
                     TRACKING · DISPATCHER
@@ -942,6 +947,22 @@ export default function TrackingTripsDashboardPage() {
                       flexWrap: "wrap",
                     }}
                   >
+                    <Link
+                      href="/"
+                      style={{
+                        textDecoration: "none",
+                        padding: "12px 14px",
+                        borderRadius: 16,
+                        background: "rgba(255,255,255,0.92)",
+                        border: "1px solid rgba(255,255,255,0.24)",
+                        color: "#0f172a",
+                        fontWeight: 950,
+                        fontSize: 14,
+                      }}
+                    >
+                      ← Main Homepage
+                    </Link>
+
                     <Link
                       href={hrefHub}
                       style={{

@@ -79,7 +79,7 @@ function normalizeCompanyId(input: unknown) {
 
 function isInvalidCompanyId(input: unknown) {
   const v = normalizeCompanyId(input);
-  return !v || v.toLowerCase() === "tracking";
+  return !v;
 }
 
 function money(v: unknown) {
@@ -348,7 +348,7 @@ export default function TrackingTripsDashboardPage() {
   );
 
   const base = useMemo(() => `/portal/tracking/${companyId}`, [companyId]);
-  const hrefHub = useMemo(() => `${base}`, [base]);
+  const hrefHub = useMemo(() => `/portal/tracking`, []);
   const hrefDriver = useMemo(() => `${base}/driver`, [base]);
   const hrefFuel = useMemo(() => `${base}/reports/fuel`, [base]);
   const hrefTripsReport = useMemo(() => `${base}/reports/trips`, [base]);
@@ -406,7 +406,10 @@ export default function TrackingTripsDashboardPage() {
     startCity.trim().length >= 2 &&
     destinationCity.trim().length >= 2;
 
-  const lookupNormalized = useMemo(() => normalizeCode(lookupCode), [lookupCode]);
+  const lookupNormalized = useMemo(
+    () => normalizeCode(lookupCode),
+    [lookupCode]
+  );
   const canLookup = lookupNormalized.length >= 4;
 
   const assignedTrips = useMemo(() => {
@@ -424,15 +427,17 @@ export default function TrackingTripsDashboardPage() {
 
   const paidTripsCount = useMemo(
     () =>
-      rows.filter((r) => String(r.payment?.status ?? "").toLowerCase() === "paid")
-        .length,
+      rows.filter(
+        (r) => String(r.payment?.status ?? "").toLowerCase() === "paid"
+      ).length,
     [rows]
   );
 
   const partialTripsCount = useMemo(
     () =>
-      rows.filter((r) => String(r.payment?.status ?? "").toLowerCase() === "partial")
-        .length,
+      rows.filter(
+        (r) => String(r.payment?.status ?? "").toLowerCase() === "partial"
+      ).length,
     [rows]
   );
 
@@ -528,7 +533,6 @@ export default function TrackingTripsDashboardPage() {
 
   useEffect(() => {
     loadTrips();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
   useEffect(() => {
@@ -850,15 +854,14 @@ export default function TrackingTripsDashboardPage() {
           </div>
           <div style={{ marginTop: 16 }}>
             <Link href="/portal/tracking" style={{ fontWeight: 950 }}>
-              ← Back to Workspaces
+              ← Back to Tracking Home
             </Link>
           </div>
         </div>
       </main>
     );
   }
-
-  return (
+    return (
     <main
       style={{
         minHeight: "100vh",
@@ -952,23 +955,7 @@ export default function TrackingTripsDashboardPage() {
                         fontSize: 14,
                       }}
                     >
-                      ← Workspace Hub
-                    </Link>
-
-                    <Link
-                      href="/portal/tracking"
-                      style={{
-                        textDecoration: "none",
-                        padding: "12px 14px",
-                        borderRadius: 16,
-                        background: "rgba(255,255,255,0.92)",
-                        border: "1px solid rgba(255,255,255,0.24)",
-                        color: "#0f172a",
-                        fontWeight: 950,
-                        fontSize: 14,
-                      }}
-                    >
-                      ← Workspaces
+                      ← Tracking Home
                     </Link>
 
                     <Link

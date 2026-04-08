@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import { exportToExcel, exportToPdf } from "../../../../lib/exports";
 import QRCode from "qrcode";
 
@@ -342,10 +344,15 @@ async function fetchJsonWithTrackingFallback(
 
 export default function TrackingTripsDashboardPage() {
   const params = useParams();
+  const router = useRouter();
+
   const companyId = useMemo(
     () => normalizeCompanyId(params?.companyId),
     [params]
   );
+
+  const [authReady, setAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const base = useMemo(() => `/portal/tracking/${companyId}`, [companyId]);
   const hrefHub = useMemo(() => `/portal/tracking`, []);
@@ -450,6 +457,19 @@ export default function TrackingTripsDashboardPage() {
     [rows]
   );
 
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+
+      if (!user) {
+        router.replace("/portal/tracking");
+      }
+    });
+
+    return () => unsub();
+  }, [router]);
+
   async function loadTrips() {
     if (isInvalidCompanyId(companyId)) {
       setRows([]);
@@ -458,6 +478,8 @@ export default function TrackingTripsDashboardPage() {
       );
       return;
     }
+
+    if (!currentUser) return;
 
     setNoticeTrips(null);
     setLoadingTrips(true);
@@ -532,12 +554,16 @@ export default function TrackingTripsDashboardPage() {
   }
 
   useEffect(() => {
-    loadTrips();
-  }, [companyId]);
+    if (authReady && currentUser) {
+      loadTrips();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, currentUser, companyId]);
 
   useEffect(() => {
     async function buildQrs() {
       if (isInvalidCompanyId(companyId)) return;
+      if (!currentUser) return;
       if (typeof window === "undefined") return;
 
       const next: Record<string, string> = {};
@@ -572,7 +598,7 @@ export default function TrackingTripsDashboardPage() {
     }
 
     buildQrs();
-  }, [boardTrips, companyId]);
+  }, [boardTrips, companyId, currentUser]);
 
   function toggleAll(v: boolean) {
     const next: Record<string, boolean> = {};
@@ -583,6 +609,11 @@ export default function TrackingTripsDashboardPage() {
   async function createTrip() {
     if (isInvalidCompanyId(companyId)) {
       setCreateNotice("Invalid companyId. Open a real workspace first.");
+      return;
+    }
+
+    if (!currentUser) {
+      router.replace("/portal/tracking");
       return;
     }
 
@@ -674,6 +705,11 @@ export default function TrackingTripsDashboardPage() {
   async function doLookup() {
     if (isInvalidCompanyId(companyId)) {
       setLookupNotice("Invalid companyId. Open a real workspace first.");
+      return;
+    }
+
+    if (!currentUser) {
+      router.replace("/portal/tracking");
       return;
     }
 
@@ -833,6 +869,34 @@ export default function TrackingTripsDashboardPage() {
     } else {
       exportToPdf({ title, meta, columns, rows: outRows });
     }
+  }
+
+  if (!authReady) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+          background:
+            "linear-gradient(180deg, #f8fafc 0%, #ffffff 35%, #f8fafc 100%)",
+        }}
+      >
+        <div style={{ maxWidth: 760, textAlign: "center" }}>
+          <div style={{ fontSize: 28, fontWeight: 1000, color: "#0f172a" }}>
+            Checking access...
+          </div>
+          <div style={{ marginTop: 10, opacity: 0.8, color: "#334155" }}>
+            Please wait while we verify your tracking session.
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!currentUser) {
+    return null;
   }
 
   if (isInvalidCompanyId(companyId)) {

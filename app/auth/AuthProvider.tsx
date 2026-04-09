@@ -52,7 +52,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
 
-    const isProtected = pathname?.startsWith("/portal");
+    const isPortalRoute = pathname?.startsWith("/portal");
+    const isTrackingRoute = pathname?.startsWith("/portal/tracking");
+
+    const isProtected = Boolean(isPortalRoute && !isTrackingRoute);
 
     if (!user && isProtected) {
       router.push("/auth/login");

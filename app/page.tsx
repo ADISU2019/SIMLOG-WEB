@@ -41,7 +41,7 @@ export default function HomePage() {
 
       <main className="min-h-screen bg-gray-50">
         {/* ================= HERO ================= */}
-        <section className="relative overflow-hidden px-6 py-32 text-center text-white md:py-40">
+        <section className="relative overflow-hidden px-6 py-20 text-white md:py-24">
           <div className="absolute inset-0">
             <img
               src="/ethiopia-flag.jpg"
@@ -52,56 +52,92 @@ export default function HomePage() {
 
           <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-blue-900/65 to-black/75" />
 
-          <div className="relative z-10 mx-auto max-w-6xl">
-            <div
-              className="mb-8 inline-flex items-center gap-3 rounded-full border border-white/20
-              bg-white/10 px-6 py-3 backdrop-blur"
-            >
-              <span className="text-base font-extrabold uppercase tracking-[0.22em]">
-                National Trade & Logistics Platform
-              </span>
+          <div className="relative z-10 mx-auto max-w-7xl">
+            {/* ===== WELCOME ABOVE CARDS ===== */}
+            <div className="mb-10 text-center">
+              <h1 className="text-4xl font-extrabold tracking-tight text-white md:text-6xl xl:text-7xl">
+                Welcome to FANTAYE PLATFORMS
+              </h1>
             </div>
 
-            <h1 className="mb-6 text-5xl font-extrabold tracking-tight md:text-7xl xl:text-8xl">
-              Welcome to FANTAYE PLATFORMS
-            </h1>
+            <div className="flex flex-col gap-10 md:flex-row md:items-start">
+              {/* ===== LOGO LEFT ===== */}
+              <div className="flex-shrink-0">
+                <Link href="/">
+                  <div className="inline-flex cursor-pointer items-center rounded-2xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                    
+                  </div>
+                </Link>
+              </div>
 
-            <p className="mx-auto mb-5 max-w-5xl text-2xl font-extrabold leading-tight md:text-4xl xl:text-5xl">
-              Ethiopia’s Digital Customs Preparation & Transiter Operations
-              Platform
-            </p>
-
-            <p className="mx-auto mb-12 max-w-4xl text-xl font-semibold leading-relaxed opacity-95 md:text-2xl">
-              A unified platform for documents, declarations, transiter
-              workflows, tax simulation, and tracking operations.
-            </p>
-
-            <div className="flex flex-col items-center justify-center gap-4 md:flex-row">
-              <Link href="#workspace">
+              {/* ===== CARDS RIGHT ===== */}
+              <div className="grid flex-1 gap-6 md:grid-cols-2">
+                {/* ADMIN LOGIN CARD */}
                 <div
-                  className="inline-block cursor-pointer rounded-full bg-white px-12 py-5 text-xl font-extrabold text-blue-700
-                  shadow-[0_10px_40px_rgba(255,255,255,0.35)]
-                  transition-all duration-300 hover:scale-105 hover:shadow-[0_16px_60px_rgba(255,255,255,0.5)] md:text-2xl"
+                  className="rounded-[2rem] border border-white/15 bg-gradient-to-br from-fuchsia-600 via-indigo-600 to-cyan-500
+                  p-8 text-white shadow-[0_20px_60px_rgba(79,70,229,0.40)] transition-all duration-300 hover:-translate-y-1"
                 >
-                  🚛 Enter Transiter Hub
-                </div>
-              </Link>
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="text-3xl">🔐</div>
+                    <div className="text-xs font-bold uppercase tracking-[0.2em] opacity-80">
+                      Admin
+                    </div>
+                  </div>
 
-              <Link href="/portal/tracking">
-                <div
-                  className="inline-block cursor-pointer rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-12 py-5 text-xl font-extrabold text-white
-                  shadow-[0_14px_44px_rgba(16,185,129,0.35)]
-                  transition-all duration-300 hover:scale-105 hover:shadow-[0_18px_60px_rgba(16,185,129,0.5)] md:text-2xl"
-                >
-                  📍 Open Tracking Workspace
+                  <h3 className="mb-3 text-2xl font-extrabold md:text-3xl">
+                    Admin Access
+                  </h3>
+
+                  <p className="mb-6 text-sm font-semibold leading-relaxed text-white/90 md:text-base">
+                    Secure platform control, monitoring, and configuration for
+                    administration and oversight.
+                  </p>
+
+                  <Link href="/auth/login">
+                    <div className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-3 font-extrabold text-indigo-700 transition-all hover:scale-105">
+                      Admin Login →
+                    </div>
+                  </Link>
                 </div>
-              </Link>
+
+                {/* DEDICATION CARD */}
+                <div
+                  className="rounded-[2rem] border border-rose-100 bg-gradient-to-br from-rose-50 via-white to-amber-100
+                  p-8 shadow-[0_20px_60px_rgba(0,0,0,0.10)] transition-all duration-300 hover:-translate-y-1"
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="text-xs font-bold uppercase tracking-[0.2em] text-black">
+                      
+                    </div>
+                  </div>
+
+                  <h3 className="mb-4 text-2xl font-extrabold text-gray-900 md:text-3xl">
+                    Tribute
+                  </h3>
+
+                  <p className="text-sm leading-relaxed text-gray-900 italic md:text-base">
+                    This platform is lovingly dedicated to our mother,the
+                    mother of humanity, Ms. Fantaye Jinfesa, and to all
+                    mothers who give everything so their children may live,
+                    grow, and rise.
+                    <br />
+                    <br />
+                    Our mother was the foundation of who we are today. Through
+                    her strength, sacrifice, and unconditional love, she shaped
+                    our path and gave us purpose.
+                    <br />
+                    <br />
+                    We, your children, carry your legacy forward with pride,
+                    gratitude, and honor.
+                    <br />
+                    <br />
+                    <span className="font-semibold not-italic text-gray-900">
+                      You are remembered forever.
+                    </span>
+                  </p>
+                </div>
+              </div>
             </div>
-
-            <p className="mt-7 text-lg font-semibold opacity-90 md:text-2xl">
-              Modules: Documents · Declarations · Transiters ·{" "}
-              <span className="font-extrabold">Tracking</span>
-            </p>
           </div>
         </section>
 

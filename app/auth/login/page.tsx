@@ -29,9 +29,12 @@ import {
   browserLocalPersistence,
   setPersistence,
   signInWithEmailAndPassword,
+  signOut,
 } from "firebase/auth";
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   limit,
   query,
@@ -46,13 +49,17 @@ type Transiter = {
   isActive?: boolean;
   logoUrl?: string;
   description?: string;
+  approvalStatus?: string;
 };
+
+const ADMIN_EMAIL = "admin@simarantechnolgies.com";
 
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const transiterParam = searchParams.get("transiter") || "";
+  const pendingParam = searchParams.get("pending") || "";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -71,6 +78,14 @@ export default function LoginPage() {
   }, [transiterParam]);
 
   useEffect(() => {
+    if (pendingParam === "1") {
+      setSuccessMessage(
+        "Application submitted successfully. Please wait for admin approval before login."
+      );
+    }
+  }, [pendingParam]);
+
+  useEffect(() => {
     const loadTransiter = async () => {
       const term = transiterInput.trim();
 
@@ -86,34 +101,27 @@ export default function LoginPage() {
         const bySlugQuery = query(
           collection(db, "transiters"),
           where("slug", "==", term),
-          where("isActive", "==", true),
           limit(1)
         );
 
         const bySlugSnap = await getDocs(bySlugQuery);
 
         if (!bySlugSnap.empty) {
-          const doc = bySlugSnap.docs[0];
+          const docSnap = bySlugSnap.docs[0];
           setSelectedTransiter({
-            id: doc.id,
-            ...(doc.data() as Omit<Transiter, "id">),
+            id: docSnap.id,
+            ...(docSnap.data() as Omit<Transiter, "id">),
           });
           return;
         }
 
-        const byIdQuery = query(
-          collection(db, "transiters"),
-          where("isActive", "==", true),
-          limit(50)
-        );
+        const byIdRef = doc(db, "transiters", term);
+        const byIdSnap = await getDoc(byIdRef);
 
-        const byIdSnap = await getDocs(byIdQuery);
-        const found = byIdSnap.docs.find((doc) => doc.id === term);
-
-        if (found) {
+        if (byIdSnap.exists()) {
           setSelectedTransiter({
-            id: found.id,
-            ...(found.data() as Omit<Transiter, "id">),
+            id: byIdSnap.id,
+            ...(byIdSnap.data() as Omit<Transiter, "id">),
           });
         } else {
           setSelectedTransiter(null);
@@ -129,6 +137,13 @@ export default function LoginPage() {
     loadTransiter();
   }, [transiterInput]);
 
+  const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
+
+  const isAdminLogin = useMemo(
+    () => normalizedEmail === ADMIN_EMAIL,
+    [normalizedEmail]
+  );
+
   const transiterLabel = useMemo(() => {
     if (!selectedTransiter) return transiterInput;
     return (
@@ -142,13 +157,8 @@ export default function LoginPage() {
     setError("");
     setSuccessMessage("");
 
-    const normalizedEmail = email.trim();
+    const normalizedEmail = email.trim().toLowerCase();
     const normalizedTransiter = transiterInput.trim();
-
-    if (!normalizedTransiter) {
-      setError("Please enter your transiter ID or slug.");
-      return;
-    }
 
     if (!normalizedEmail) {
       setError("Please enter your email address.");
@@ -160,17 +170,64 @@ export default function LoginPage() {
       return;
     }
 
+    if (!isAdminLogin && !normalizedTransiter) {
+      setError("Please enter your transiter ID or slug.");
+      return;
+    }
+
     try {
       setSigningIn(true);
 
       await setPersistence(auth, browserLocalPersistence);
       await signInWithEmailAndPassword(auth, normalizedEmail, password);
 
+      if (isAdminLogin) {
+        setSuccessMessage("Admin login successful. Opening approval page...");
+        router.push("/admin");
+        return;
+      }
+
       const targetId =
         selectedTransiter?.slug || selectedTransiter?.id || normalizedTransiter;
 
+      let transiterSnap = await getDoc(doc(db, "transiters", targetId));
+
+      if (!transiterSnap.exists() && selectedTransiter?.id) {
+        transiterSnap = await getDoc(doc(db, "transiters", selectedTransiter.id));
+      }
+
+      if (!transiterSnap.exists()) {
+        await signOut(auth);
+        setError("Transiter application not found.");
+        return;
+      }
+
+      const transiterData = transiterSnap.data() as {
+        approvalStatus?: string;
+        isActive?: boolean;
+        slug?: string;
+      };
+
+      if (transiterData?.approvalStatus === "rejected") {
+        await signOut(auth);
+        setError("Your application was not approved. Please contact admin.");
+        return;
+      }
+
+      if (
+        transiterData?.approvalStatus !== "approved" ||
+        transiterData?.isActive !== true
+      ) {
+        await signOut(auth);
+        setError("Your application is still waiting for admin approval.");
+        return;
+      }
+
+      const approvedTargetId =
+        transiterData?.slug || selectedTransiter?.slug || transiterSnap.id;
+
       setSuccessMessage("Login successful. Opening your transiter dashboard...");
-      router.push(`/portal/${targetId}/dashboard`);
+      router.push(`/portal/${approvedTargetId}/dashboard`);
     } catch (err: any) {
       console.error("Login error:", err);
 
@@ -245,10 +302,13 @@ export default function LoginPage() {
                   value={transiterInput}
                   onChange={(e) => setTransiterInput(e.target.value)}
                   placeholder="e.g. simaran or awash"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                  disabled={isAdminLogin}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-slate-100"
                 />
                 <p className="mt-2 text-sm text-slate-500">
-                  This tells the platform which transiter workspace to open.
+                  {isAdminLogin
+                    ? "Admin login does not require a transiter workspace."
+                    : "This tells the platform which transiter workspace to open."}
                 </p>
               </div>
 
@@ -381,6 +441,11 @@ export default function LoginPage() {
                   <div className="mb-3 h-6 w-1/2 rounded bg-slate-200" />
                   <div className="mb-2 h-4 w-full rounded bg-slate-200" />
                   <div className="h-4 w-2/3 rounded bg-slate-200" />
+                </div>
+              ) : isAdminLogin ? (
+                <div className="mt-5 rounded-2xl bg-slate-50 p-5 text-slate-600">
+                  Admin login detected. Approval dashboard will open after sign
+                  in.
                 </div>
               ) : selectedTransiter ? (
                 <div className="mt-5">

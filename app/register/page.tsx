@@ -139,7 +139,8 @@ export default function RegisterPage() {
           normalizedDescription ||
           "Registered transiter workspace for customs preparation and declaration operations.",
         logoUrl: "",
-        isActive: true,
+        isActive: false,
+        approvalStatus: "pending",
         ownerUid: uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -160,10 +161,10 @@ export default function RegisterPage() {
       console.log("REGISTER STEP 5: success");
 
       setSuccessMessage(
-        "Subscription successful. Opening your transiter dashboard..."
+        "Application submitted successfully. Please wait for admin approval."
       );
 
-      router.push(`/portal/${normalizedSlug}/dashboard`);
+      router.push("/auth/login?pending=1");
     } catch (error: any) {
       console.error("REGISTER ERROR OBJECT:", error);
       console.error("REGISTER ERROR CODE:", error?.code);
@@ -208,7 +209,7 @@ export default function RegisterPage() {
 
           <p className="mt-6 max-w-3xl text-lg leading-relaxed text-white/90 md:text-2xl">
             Subscribe as a new transiter company, create your login account,
-            and open your own dashboard inside the platform.
+            and submit your workspace for admin approval.
           </p>
         </div>
       </section>
@@ -353,7 +354,7 @@ export default function RegisterPage() {
                 disabled={submitting}
                 className="inline-flex w-full items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-4 text-lg font-extrabold text-white shadow-lg transition hover:from-blue-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {submitting ? "Creating Workspace..." : "Create Transiter Account"}
+                {submitting ? "Submitting Application..." : "Create Transiter Account"}
               </button>
             </form>
 
@@ -439,7 +440,8 @@ export default function RegisterPage() {
                     Step 2
                   </p>
                   <p className="mt-2 text-slate-700">
-                    Your transiter workspace is created inside the platform.
+                    Your application is submitted and sent to the admin approval
+                    page.
                   </p>
                 </div>
 
@@ -448,7 +450,8 @@ export default function RegisterPage() {
                     Step 3
                   </p>
                   <p className="mt-2 text-slate-700">
-                    You are redirected to your own dashboard and can begin work.
+                    After admin approval, you can sign in and begin work in your
+                    dashboard.
                   </p>
                 </div>
               </div>
